@@ -21,7 +21,7 @@ class Room {
   humans() { return this.players.filter(p => p.ws).length; }
   add(ws, name) {
     let id = 1; while (this.players.some(p => p.id === id)) id++;
-    const p = { id, ws, name: (name || 'Goober').slice(0, 14), e: EMOJI[id - 1], x: 0, y: 0, d: 0, nd: null, alive: false, tr: [], respawn: 0, bot: !ws, phase: 'out', lim: 8 };
+    const p = { id, ws, name: (name || 'Goober').slice(0, 14), e: EMOJI[id - 1], x: 0, y: 0, d: 0, nd: null, q: [], alive: false, tr: [], respawn: 0, bot: !ws, phase: 'out', lim: 8 };
     this.players.push(p); this.spawn(p); return p;
   }
   spawn(p) {
@@ -31,7 +31,7 @@ class Room {
       for (let a = -3; a <= 3 && ok; a++) for (let b = -3; b <= 3; b++) if (this.owner[(y + b) * W + x + a] || this.trail[(y + b) * W + x + a]) { ok = false; break; }
     }
     for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) this.owner[(y + b) * W + x + a] = p.id;
-    Object.assign(p, { x, y, d: rnd(4), nd: null, alive: true, tr: [], hx: x, hy: y, phase: 'out', lim: 6 + rnd(8) });
+    Object.assign(p, { x, y, d: rnd(4), nd: null, q: [], alive: true, tr: [], hx: x, hy: y, phase: 'out', lim: 6 + rnd(8) });
   }
   kill(p, by, why) {
     if (!p.alive) return;
@@ -83,7 +83,8 @@ class Room {
     for (const p of this.players) {
       if (!p.alive) { if (--p.respawn <= 0) this.spawn(p); continue; }
       if (p.bot) this.think(p);
-      if (p.nd !== null && (p.nd + 2) % 4 !== p.d) p.d = p.nd;
+      if (p.bot) { if (p.nd !== null && (p.nd + 2) % 4 !== p.d) p.d = p.nd; }
+      else while (p.q.length) { const d = p.q.shift(); if (d !== p.d && (d + 2) % 4 !== p.d) { p.d = d; break; } }
       const x = p.x + DX[p.d], y = p.y + DY[p.d];
       if (x < 0 || y < 0 || x >= W || y >= H) { this.kill(p, null, 'wall'); continue; }
       const i = y * W + x, tv = this.trail[i];
@@ -126,7 +127,7 @@ function enter(ws, room, name) {
 wss.on('connection', ws => {
   ws.on('message', raw => {
     let m; try { m = JSON.parse(raw); } catch { return; }
-    if (m.t === 'dir') { if (ws.me && m.d >= 0 && m.d < 4) ws.me.nd = m.d; return; }
+    if (m.t === 'dir') { const me = ws.me; if (me && m.d >= 0 && m.d < 4) { const last = me.q.length ? me.q[me.q.length - 1] : me.d; if (m.d !== last && me.q.length < 3) me.q.push(m.d); } return; }
     if (ws.room) return;
     if (m.t === 'public') {
       let r = [...rooms.values()].find(r => r.pub && r.humans() < r.max - 3);
