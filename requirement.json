@@ -1,0 +1,35 @@
+{
+  "project": "goober-grab",
+  "runtime": "Node.js",
+  "node_version": ">=18",
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "install_command": "npm install",
+  "start_command": "npm start",
+  "render_settings": {
+    "service_type": "Web Service",
+    "language": "Node",
+    "branch": "main",
+    "root_directory": "(leave empty)",
+    "build_command": "npm install",
+    "start_command": "npm start",
+    "instance_type": "Free",
+    "environment_variables": "None needed (Render sets PORT automatically)",
+    "health_check_path": "/"
+  },
+  "github_commands": [
+    "git init",
+    "git add .",
+    "git commit -m \"Goober Grab\"",
+    "git branch -M main",
+    "git remote add origin https://github.com/YOUR_USERNAME/goober-grab.git",
+    "git push -u origin main"
+  ],
+  "local_test": [
+    "npm install",
+    "npm start",
+    "open http://localhost:3000"
+  ],
+  "note": "npm reads package.json to install packages. This file is a quick reference so you know exactly what to type in Render."
+}

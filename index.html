@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Goober Grab</title>
+<link href="https://fonts.googleapis.com/css2?family=Bagel+Fat+One&family=Nunito:wght@700;900&display=swap" rel="stylesheet">
+<style>
+:root{--grape:#2e1065;--pink:#ff6fb5;--lime:#c6f432;--ink:#1b0a3c;--paper:#fff7fb}
+*{box-sizing:border-box;margin:0}
+html,body{height:100%;overflow:hidden;background:var(--grape);font-family:Nunito,system-ui,sans-serif;color:var(--paper);touch-action:none}
+canvas{position:fixed;inset:0;width:100%;height:100%}
+.hide{display:none!important}
+#menu{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;padding:16px;background:radial-gradient(circle at 20% 20%,#5b21b6 0,transparent 45%),radial-gradient(circle at 85% 80%,#be185d 0,transparent 40%),var(--grape);overflow:auto}
+.card{width:min(440px,100%);background:var(--paper);color:var(--ink);border:4px solid var(--ink);border-radius:28px;padding:24px;box-shadow:8px 8px 0 var(--ink);transform:rotate(-1deg)}
+h1{font-family:'Bagel Fat One',cursive;font-size:3.2rem;line-height:.95;color:var(--pink);-webkit-text-stroke:2px var(--ink);text-shadow:4px 4px 0 var(--ink);margin-bottom:6px}
+.sub{font-weight:700;margin-bottom:16px}
+input,select,button{font:inherit;font-weight:900;border:3px solid var(--ink);border-radius:16px;padding:12px 14px;width:100%;background:#fff;color:var(--ink)}
+button{cursor:pointer;box-shadow:0 5px 0 var(--ink);transition:transform .08s,box-shadow .08s}
+button:active{transform:translateY(4px);box-shadow:0 1px 0 var(--ink)}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:4px solid var(--lime);outline-offset:2px}
+.go{background:var(--lime)}.mk{background:var(--pink)}.jn{background:#7dd3fc}
+.row{display:flex;gap:10px;margin-top:12px}.row>*{flex:1}
+label{font-size:.85rem;display:block;margin-top:12px}
+.big{margin-top:14px;font-size:1.15rem}
+hr{border:0;border-top:3px dashed var(--ink);margin:18px 0 6px;opacity:.25}
+#err{color:#c01048;font-weight:900;margin-top:10px;min-height:1.2em}
+#hud{position:fixed;top:10px;left:10px;display:flex;flex-direction:column;gap:8px;align-items:flex-start;pointer-events:none}
+#hud *{pointer-events:auto}
+#code{background:var(--lime);color:var(--ink);border:3px solid var(--ink);border-radius:16px;padding:6px 14px;font-family:'Bagel Fat One';font-size:1.3rem;letter-spacing:.12em;cursor:pointer;box-shadow:3px 3px 0 var(--ink);width:auto}
+#hint{font-size:.8rem;font-weight:900;background:var(--ink);padding:3px 10px;border-radius:10px}
+#lb{position:fixed;top:10px;right:10px;background:rgba(27,10,60,.85);border:3px solid var(--pink);border-radius:18px;padding:10px 12px;min-width:170px;font-weight:900;font-size:.9rem}
+#lb div{display:flex;justify-content:space-between;gap:10px;padding:2px 0}#lb .me{color:var(--lime)}
+#feed{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);display:flex;flex-direction:column;gap:6px;align-items:center;pointer-events:none;width:90%}
+#feed span{background:var(--paper);color:var(--ink);border:3px solid var(--ink);border-radius:14px;padding:5px 12px;font-weight:900;font-size:.9rem;animation:pop .25s}
+@keyframes pop{from{transform:scale(.6);opacity:0}}
+#dead{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;font-family:'Bagel Fat One';font-size:clamp(2rem,8vw,4rem);text-align:center;color:var(--pink);-webkit-text-stroke:2px var(--ink);text-shadow:4px 4px 0 var(--ink);pointer-events:none}
+@media(prefers-reduced-motion:reduce){#feed span{animation:none}}
+</style></head><body>
+<canvas id="c"></canvas>
+<div id="menu"><div class="card">
+  <h1>Goober<br>Grab!</h1>
+  <p class="sub">Paint the map. Dodge the tails. Squish your friends. 🥔</p>
+  <label for="name">Your goober name</label>
+  <input id="name" maxlength="14" placeholder="Sir Potato">
+  <button class="go big" id="pub">🌍 Play Online (with bots)</button>
+  <hr>
+  <label>Make a private room for friends</label>
+  <div class="row">
+    <select id="max" aria-label="Max players"></select>
+    <select id="bots" aria-label="Bots"><option value="0">No bots</option><option value="1">1 bot</option><option value="2">2 bots</option><option value="3">3 bots</option></select>
+  </div>
+  <button class="mk big" id="mk">🎈 Create Room</button>
+  <label for="jc">Got a room code?</label>
+  <div class="row"><input id="jc" maxlength="4" placeholder="ABCD" style="text-transform:uppercase"><button class="jn" id="jn">Join</button></div>
+  <div id="err" role="alert"></div>
+</div></div>
+<div id="hud" class="hide"><button id="code" title="Tap to copy invite link"></button><span id="hint">Arrows / WASD / swipe</span></div>
+<div id="lb" class="hide"></div><div id="feed"></div><div id="dead" class="hide">SQUISHED!<br>respawning…</div>
+<script>
+const $=id=>document.getElementById(id),cv=$('c'),cx=cv.getContext('2d');
+const COL=['','#ff4d6d','#4dabf7','#ffd43b','#51cf66','#b197fc','#ff922b','#22d3c5','#f06595','#a9e34b','#868e96'];
+const CS=30,TICK=125;let ws,me=0,W=50,H=50,owner=new Uint8Array(2500),trail=new Uint8Array(2500),pl={},joined=false,shake=0;
+for(let i=2;i<=9;i++)$('max').add(new Option(i+' players',i,i===4,i===4));
+$('name').value=localStorage.getItem('gg-name')||'';
+const q=new URLSearchParams(location.search).get('room');if(q)$('jc').value=q.toUpperCase();
+function connect(first){
+  ws=new WebSocket((location.protocol==='https:'?'wss://':'ws://')+location.host);
+  ws.onopen=()=>ws.send(JSON.stringify(first));
+  ws.onmessage=e=>{const m=JSON.parse(e.data);
+    if(m.t==='err'){$('err').textContent=m.m;ws.close();return}
+    if(m.t==='joined'){me=m.id;W=m.W;H=m.H;joined=true;$('menu').classList.add('hide');$('hud').classList.remove('hide');$('lb').classList.remove('hide');
+      $('code').textContent='Room '+m.code+' 📋';$('code').dataset.c=m.code;history.replaceState(null,'','?room='+m.code)}
+    if(m.t==='s')update(m)};
+  ws.onclose=()=>{if(joined)location.reload()};
+}
+function start(msg){const n=$('name').value.trim()||'Goober';localStorage.setItem('gg-name',n);$('err').textContent='';connect({...msg,name:n})}
+$('pub').onclick=()=>start({t:'public'});
+$('mk').onclick=()=>start({t:'create',max:+$('max').value,bots:+$('bots').value});
+$('jn').onclick=()=>{const c=$('jc').value.trim();c.length===4?start({t:'join',code:c}):$('err').textContent='Room codes have 4 letters.'};
+$('code').onclick=async()=>{const url=location.origin+'/?room='+$('code').dataset.c;
+  try{if(navigator.share)await navigator.share({title:'Goober Grab',text:'Join my room! Code: '+$('code').dataset.c,url});else{await navigator.clipboard.writeText(url);toast('Invite link copied! Send it to your friends 🎉')}}catch(e){}};
+function toast(t){const s=document.createElement('span');s.textContent=t;$('feed').append(s);setTimeout(()=>s.remove(),4000);while($('feed').children.length>3)$('feed').firstChild.remove()}
+function update(m){
+  const g=atob(m.g);for(let i=0;i<2500;i++){owner[i]=g.charCodeAt(i);trail[i]=g.charCodeAt(2500+i)}
+  const now=performance.now();
+  for(const p of m.p){const o=pl[p.i];
+    if(o&&Math.abs(o.x-p.x)+Math.abs(o.y-p.y)<=2&&o.a&&p.a){p.px=o.rx;p.py=o.ry}else{p.px=p.x;p.py=p.y}
+    p.t=now;pl[p.i]=p;
+    if(p.i===me){$('dead').classList.toggle('hide',!!p.a);if(!p.a)shake=0}}
+  for(const k in pl)if(!m.p.find(p=>p.i==k))delete pl[k];
+  m.f.forEach(toast);
+  const top=[...m.p].sort((a,b)=>b.s-a.s);
+  $('lb').innerHTML=top.map(p=>`<div class="${p.i===me?'me':''}"><span>${p.e} ${p.n.replace(/</g,'&lt;')}</span><span>${p.s}%</span></div>`).join('');
+}
+function dir(d){if(joined&&ws.readyState===1)ws.send(JSON.stringify({t:'dir',d}))}
+const K={ArrowUp:0,w:0,ArrowRight:1,d:1,ArrowDown:2,s:2,ArrowLeft:3,a:3};
+addEventListener('keydown',e=>{if(e.key in K&&joined){e.preventDefault();dir(K[e.key])}});
+let t0;addEventListener('touchstart',e=>{t0=e.touches[0]},{passive:true});
+addEventListener('touchend',e=>{if(!t0||!joined)return;const t=e.changedTouches[0],dx=t.clientX-t0.clientX,dy=t.clientY-t0.clientY;
+  if(Math.max(Math.abs(dx),Math.abs(dy))>24)dir(Math.abs(dx)>Math.abs(dy)?(dx>0?1:3):(dy>0?2:0))});
+function resize(){const r=devicePixelRatio||1;cv.width=innerWidth*r;cv.height=innerHeight*r;cx.setTransform(r,0,0,r,0,0)}
+addEventListener('resize',resize);resize();
+function draw(){
+  requestAnimationFrame(draw);
+  const w=innerWidth,h=innerHeight,now=performance.now();
+  cx.fillStyle='#2e1065';cx.fillRect(0,0,w,h);
+  for(const k in pl){const p=pl[k],f=Math.min(1,(now-p.t)/TICK);p.rx=p.px+(p.x-p.px)*f;p.ry=p.py+(p.y-p.py)*f}
+  const m=pl[me]||{rx:W/2,ry:H/2};
+  const sc=Math.min(1,Math.max(.55,Math.min(w,h)/700));
+  cx.save();cx.translate(w/2,h/2);cx.scale(sc,sc);cx.translate(-(m.rx+.5)*CS,-(m.ry+.5)*CS);
+  cx.fillStyle='#ff6fb5';cx.fillRect(-14,-14,W*CS+28,H*CS+28);
+  cx.fillStyle='#fff7fb';cx.fillRect(0,0,W*CS,H*CS);
+  cx.fillStyle='#f3e8ff';for(let y=0;y<H;y++)for(let x=(y&1);x<W;x+=2)cx.fillRect(x*CS,y*CS,CS,CS);
+  for(let i=0;i<W*H;i++){const o=owner[i],t=trail[i];if(!o&&!t)continue;const x=(i%W)*CS,y=((i/W)|0)*CS;
+    if(o){cx.fillStyle=COL[o];cx.fillRect(x,y,CS,CS);cx.fillStyle='rgba(255,255,255,.18)';cx.fillRect(x+3,y+3,CS-6,CS-6)}
+    if(t){cx.fillStyle=COL[t];cx.globalAlpha=.55;cx.fillRect(x+4,y+4,CS-8,CS-8);cx.globalAlpha=1;cx.fillStyle='#fff';cx.beginPath();cx.arc(x+CS/2,y+CS/2,3,0,7);cx.fill()}}
+  cx.lineWidth=5;cx.strokeStyle='#1b0a3c';cx.strokeRect(0,0,W*CS,H*CS);
+  cx.textAlign='center';cx.textBaseline='middle';
+  for(const k in pl){const p=pl[k];if(!p.a)continue;const x=(p.rx+.5)*CS,y=(p.ry+.5)*CS,b=Math.sin(now/110+p.i)*2;
+    cx.fillStyle=COL[p.i];cx.strokeStyle='#1b0a3c';cx.lineWidth=3;cx.beginPath();cx.arc(x,y+b,CS*.62,0,7);cx.fill();cx.stroke();
+    cx.font=(CS*.8)+'px serif';cx.fillText(p.e,x,y+b+1);
+    cx.font='900 13px Nunito';cx.lineWidth=4;cx.strokeStyle='#1b0a3c';cx.strokeText((p.b?'🤖 ':'')+p.n,x,y-CS);cx.fillStyle='#fff';cx.fillText((p.b?'🤖 ':'')+p.n,x,y-CS)}
+  cx.restore();
+}
+draw();
+</script></body></html>
