@@ -2,7 +2,7 @@ const http = require('http'), fs = require('fs'), path = require('path');
 const { WebSocketServer } = require('ws');
 const W = 50, H = 50, N = W * H, TICK = 125;
 const DX = [0, 1, 0, -1], DY = [-1, 0, 1, 0];
-const EMOJI = ['🥔', '🐸', '🍕', '🦆', '🐙', '🍩', '🥦', '🦖', '🧀', '🐧'];
+const EMOJI = ['🥔', '🐸', '🍕', '🦆', '🐙', '🍩', '🥦', '🦖', '🧀', '🐧', '🦄', '🐷', '🍔', '🦀', '🐝', '🍉', '👻', '🐢', '🌮', '🦊'];
 const BOTS = ['Sir Bumblebutt', 'Captain Noodle', 'Lady Waffles', 'Dr. Pickle', 'Big Sploot'];
 const found = [path.join(__dirname, 'index.html'), path.join(__dirname, 'public', 'index.html')].find(f => fs.existsSync(f));
 if (!found) console.error('index.html not found. Upload index.html next to server.js.');
@@ -10,11 +10,12 @@ const html = found ? fs.readFileSync(found) : Buffer.from('<h1>index.html is mis
 const server = http.createServer((q, r) => { r.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); r.end(html); });
 const wss = new WebSocketServer({ server });
 const rooms = new Map();
+const GRAB_MS = 180000;
 const rnd = n => Math.floor(Math.random() * n);
 
 class Room {
   constructor(code, pub, max, bots) {
-    Object.assign(this, { code, pub, max, nb: bots, players: [], owner: new Uint8Array(N), trail: new Uint8Array(N), feed: [], t: 0 });
+    Object.assign(this, { code, pub, max, nb: bots, players: [], owner: new Uint8Array(N), trail: new Uint8Array(N), feed: [], t: 0, phase: pub ? 'play' : 'lobby', host: 0, endAt: 0, until: 0, rank: [] });
     for (let i = 0; i < bots; i++) this.add(null, BOTS[i]);
     this.timer = setInterval(() => this.tick(), TICK);
   }
@@ -22,7 +23,7 @@ class Room {
   add(ws, name) {
     let id = 1; while (this.players.some(p => p.id === id)) id++;
     const p = { id, ws, name: (name || 'Goober').slice(0, 14), e: EMOJI[id - 1], x: 0, y: 0, d: 0, nd: null, q: [], alive: false, tr: [], respawn: 0, bot: !ws, phase: 'out', lim: 8 };
-    this.players.push(p); this.spawn(p); return p;
+    this.players.push(p); if (this.phase === 'play') this.spawn(p); if (!p.bot && !this.host) this.host = p.id; return p;
   }
   spawn(p) {
     let x, y, ok = false;
@@ -78,7 +79,28 @@ class Room {
       tr[i] = 0;
     }
   }
+  send(msg) { for (const p of this.players) if (p.ws && p.ws.readyState === 1) p.ws.send(msg); }
+  lobbyMsg() { return JSON.stringify({ t: 'lobby', mode: 'grab', code: this.code, host: this.host, max: this.max, p: this.players.map(p => ({ i: p.id, n: p.name, e: p.e, b: p.bot ? 1 : 0 })) }); }
+  start() {
+    if (this.phase !== 'lobby' || this.players.length < 2) return;
+    this.owner.fill(0); this.trail.fill(0); this.feed = [];
+    for (const p of this.players) { p.tr = []; p.alive = false; }
+    for (const p of this.players) this.spawn(p);
+    this.phase = 'play'; this.endAt = Date.now() + GRAB_MS;
+  }
   tick() {
+    const now = Date.now();
+    if (this.phase === 'lobby') return this.send(this.lobbyMsg());
+    if (this.phase === 'result') {
+      if (now >= this.until) { this.phase = 'lobby'; this.owner.fill(0); this.trail.fill(0); return this.send(this.lobbyMsg()); }
+      return this.send(JSON.stringify({ t: 'end', tl: this.until - now, p: this.rank }));
+    }
+    if (this.endAt && now >= this.endAt) {
+      const c = {}; for (let i = 0; i < N; i++) if (this.owner[i]) c[this.owner[i]] = (c[this.owner[i]] || 0) + 1;
+      this.rank = this.players.map(p => ({ i: p.id, n: p.name, e: p.e, b: p.bot ? 1 : 0, s: +((c[p.id] || 0) * 100 / N).toFixed(1) })).sort((a, b) => b.s - a.s);
+      this.endAt = 0; this.phase = 'result'; this.until = now + 10000;
+      return this.send(JSON.stringify({ t: 'end', tl: 10000, p: this.rank }));
+    }
     this.t++;
     for (const p of this.players) {
       if (!p.alive) { if (--p.respawn <= 0) this.spawn(p); continue; }
@@ -100,7 +122,7 @@ class Room {
     const counts = {}, buf = Buffer.alloc(N * 2);
     for (let i = 0; i < N; i++) { buf[i] = this.owner[i]; buf[N + i] = this.trail[i]; if (this.owner[i]) counts[this.owner[i]] = (counts[this.owner[i]] || 0) + 1; }
     const msg = JSON.stringify({
-      t: 's', g: buf.toString('base64'), f: this.feed.splice(0),
+      t: 's', ph: 'play', tl: this.endAt ? this.endAt - Date.now() : 0, g: buf.toString('base64'), f: this.feed.splice(0),
       p: this.players.map(p => ({ i: p.id, n: p.name, e: p.e, x: p.x, y: p.y, d: p.d, a: p.alive ? 1 : 0, s: +((counts[p.id] || 0) * 100 / N).toFixed(1), b: p.bot ? 1 : 0 }))
     });
     for (const p of this.players) if (p.ws && p.ws.readyState === 1) p.ws.send(msg);
@@ -108,6 +130,7 @@ class Room {
   remove(p) {
     this.kill(p, null, 'quit');
     this.players = this.players.filter(z => z !== p);
+    if (this.host === p.id) { const h = this.players.find(z => z.ws); this.host = h ? h.id : 0; }
     if (!this.humans()) { clearInterval(this.timer); rooms.delete(this.code); }
   }
 }
@@ -115,7 +138,7 @@ class Room {
 const RACE_MS = 45000;
 class RaceRoom {
   constructor(code, pub, max, bots) {
-    Object.assign(this, { code, pub, max, nb: bots, race: true, players: [], ph: 'count', until: Date.now() + 6000, seed: rnd(1e9) });
+    Object.assign(this, { code, pub, max, nb: bots, race: true, players: [], ph: pub ? 'count' : 'lobby', host: 0, until: Date.now() + 6000, seed: rnd(1e9) });
     for (let i = 0; i < bots; i++) this.add(null, BOTS[i]);
     this.timer = setInterval(() => this.tick(), 100);
   }
@@ -123,7 +146,7 @@ class RaceRoom {
   add(ws, name) {
     let id = 1; while (this.players.some(p => p.id === id)) id++;
     const p = { id, ws, name: (name || 'Goober').slice(0, 14), e: EMOJI[id - 1], x: 0, d: 0, v: 0, c: 0, bot: !ws, w: this.ph === 'run' ? 1 : 0, tx: 0, st: 0, jt: 0, j: 0, tv: 12, lp: Date.now() };
-    this.players.push(p); this.lanes(); return p;
+    this.players.push(p); if (!p.bot && !this.host) this.host = p.id; this.lanes(); return p;
   }
   lanes() { const n = this.players.length; if (this.ph === 'count') this.players.forEach((p, i) => { p.x = n < 2 ? 0 : -0.6 + i * 1.2 / (n - 1); }); }
   newRound(n) {
@@ -133,10 +156,11 @@ class RaceRoom {
   }
   tick() {
     const n = Date.now();
+    if (this.ph === 'lobby') return this.send(this.lobbyMsg());
     if (n >= this.until) {
       if (this.ph === 'count') { this.ph = 'run'; this.until = n + RACE_MS; for (const p of this.players) p.lp = n; }
-      else if (this.ph === 'run') { this.ph = 'result'; this.until = n + 7000; }
-      else this.newRound(n);
+      else if (this.ph === 'run') { this.ph = 'result'; this.until = n + (this.pub ? 7000 : 10000); }
+      else if (this.pub) this.newRound(n); else this.toLobby();
     }
     if (this.ph === 'run') for (const p of this.players) if (p.bot) {
       if (n < p.st) p.v += (4 - p.v) * 0.3;
@@ -150,6 +174,10 @@ class RaceRoom {
       p: this.players.map(p => ({ i: p.id, n: p.name, e: p.e, x: +p.x.toFixed(3), d: +p.d.toFixed(1), b: p.bot ? 1 : 0, w: p.w, c: p.c, j: p.j })) });
     for (const p of this.players) if (p.ws && p.ws.readyState === 1) p.ws.send(msg);
   }
+  send(msg) { for (const p of this.players) if (p.ws && p.ws.readyState === 1) p.ws.send(msg); }
+  lobbyMsg() { return JSON.stringify({ t: 'lobby', mode: 'race', code: this.code, host: this.host, max: this.max, p: this.players.map(p => ({ i: p.id, n: p.name, e: p.e, b: p.bot ? 1 : 0 })) }); }
+  start() { if (this.ph === 'lobby' && this.players.length) this.newRound(Date.now()); }
+  toLobby() { this.ph = 'lobby'; for (const p of this.players) Object.assign(p, { d: 0, v: 0, c: 0, w: 0, j: 0 }); }
   pos(p, m) {
     if (this.ph !== 'run' || p.w) return;
     const n = Date.now(), cap = (n - p.lp) / 1000 * 24 + 1; p.lp = n;
@@ -158,6 +186,7 @@ class RaceRoom {
   }
   remove(p) {
     this.players = this.players.filter(z => z !== p);
+    if (this.host === p.id) { const h = this.players.find(z => z.ws); this.host = h ? h.id : 0; }
     if (!this.humans()) { clearInterval(this.timer); rooms.delete(this.code); }
   }
 }
@@ -168,6 +197,8 @@ function newCode() {
   return c;
 }
 function enter(ws, room, name) {
+  const ph = room.race ? room.ph : room.phase;
+  if (!room.pub && ph !== 'lobby' && ph !== 'result') return ws.send(JSON.stringify({ t: 'err', m: 'That match already started. Join again after it ends!' }));
   if (room.humans() >= room.max - room.players.filter(p => p.bot).length) return ws.send(JSON.stringify({ t: 'err', m: 'That room is full (max players reached).' }));
   const p = room.add(ws, name);
   ws.room = room; ws.me = p;
@@ -177,16 +208,17 @@ function enter(ws, room, name) {
 wss.on('connection', ws => {
   ws.on('message', raw => {
     let m; try { m = JSON.parse(raw); } catch { return; }
+    if (m.t === 'start') { const r = ws.room; if (r && ws.me && !r.pub && r.host === ws.me.id) r.start(); return; }
     if (m.t === 'pos') { if (ws.room && ws.room.race && ws.me) ws.room.pos(ws.me, m); return; }
     if (m.t === 'dir') { const me = ws.me; if (me && me.q && m.d >= 0 && m.d < 4) { const last = me.q.length ? me.q[me.q.length - 1] : me.d; if (m.d !== last && me.q.length < 3) me.q.push(m.d); } return; }
     if (ws.room) return;
     if (m.t === 'public') {
       const race = m.mode === 'race';
       let r = [...rooms.values()].find(r => r.pub && !!r.race === race && r.humans() < r.max - r.nb);
-      if (!r) { r = race ? new RaceRoom(newCode(), true, 5, 2) : new Room(newCode(), true, 9, 3); rooms.set(r.code, r); }
+      if (!r) { r = race ? new RaceRoom(newCode(), true, 20, 2) : new Room(newCode(), true, 20, 3); rooms.set(r.code, r); }
       enter(ws, r, m.name);
     } else if (m.t === 'create') {
-      const race = m.mode === 'race', top = race ? 5 : 9, bt = race ? 2 : 3;
+      const race = m.mode === 'race', top = 20, bt = race ? 2 : 3;
       const max = Math.min(top, Math.max(2, m.max | 0 || 4)), bots = Math.min(bt, Math.max(0, m.bots | 0), max - 1);
       const r = race ? new RaceRoom(newCode(), false, max, bots) : new Room(newCode(), false, max, bots); rooms.set(r.code, r);
       enter(ws, r, m.name);
