@@ -122,7 +122,7 @@ class RaceRoom {
   humans() { return this.players.filter(p => p.ws).length; }
   add(ws, name) {
     let id = 1; while (this.players.some(p => p.id === id)) id++;
-    const p = { id, ws, name: (name || 'Goober').slice(0, 14), e: EMOJI[id - 1], x: 0, d: 0, v: 0, c: 0, bot: !ws, w: this.ph === 'run' ? 1 : 0, tx: 0, st: 0, tv: 12, lp: Date.now() };
+    const p = { id, ws, name: (name || 'Goober').slice(0, 14), e: EMOJI[id - 1], x: 0, d: 0, v: 0, c: 0, bot: !ws, w: this.ph === 'run' ? 1 : 0, tx: 0, st: 0, jt: 0, j: 0, tv: 12, lp: Date.now() };
     this.players.push(p); this.lanes(); return p;
   }
   lanes() { const n = this.players.length; if (this.ph === 'count') this.players.forEach((p, i) => { p.x = n < 2 ? 0 : -0.6 + i * 1.2 / (n - 1); }); }
@@ -143,17 +143,18 @@ class RaceRoom {
       else { p.v += (p.tv - p.v) * 0.15; if (Math.random() < 0.012) p.st = n + 700; }
       if (Math.random() < 0.08) p.tx = Math.random() * 1.7 - 0.85;
       if (Math.random() < 0.03) p.tv = 10.5 + Math.random() * 3.5;
-      p.x += (p.tx - p.x) * 0.12; p.d += p.v * 0.1; p.c = n < p.st ? 1 : 0;
+      if (Math.random() < 0.008) p.jt = n + 1000;
+      p.x += (p.tx - p.x) * 0.12; p.d += p.v * 0.1 * (n < p.jt ? 1.2 : 1); p.c = n < p.st ? 1 : 0; p.j = n < p.jt ? 1 : 0;
     }
     const msg = JSON.stringify({ t: 'r', ph: this.ph, tl: this.until - n, seed: this.seed,
-      p: this.players.map(p => ({ i: p.id, n: p.name, e: p.e, x: +p.x.toFixed(3), d: +p.d.toFixed(1), b: p.bot ? 1 : 0, w: p.w, c: p.c })) });
+      p: this.players.map(p => ({ i: p.id, n: p.name, e: p.e, x: +p.x.toFixed(3), d: +p.d.toFixed(1), b: p.bot ? 1 : 0, w: p.w, c: p.c, j: p.j })) });
     for (const p of this.players) if (p.ws && p.ws.readyState === 1) p.ws.send(msg);
   }
   pos(p, m) {
     if (this.ph !== 'run' || p.w) return;
     const n = Date.now(), cap = (n - p.lp) / 1000 * 24 + 1; p.lp = n;
     p.x = Math.max(-1, Math.min(1, +m.x || 0));
-    p.d = Math.min(Math.max(p.d, +m.d || 0), p.d + cap); p.c = m.c ? 1 : 0;
+    p.d = Math.min(Math.max(p.d, +m.d || 0), p.d + cap); p.c = m.c ? 1 : 0; p.j = m.j ? 1 : 0;
   }
   remove(p) {
     this.players = this.players.filter(z => z !== p);
