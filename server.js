@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const http = require('http'), fs = require('fs'), path = require('path');
 const { WebSocketServer } = require('ws');
 const W = 50, H = 50, N = W * H, TICK = 125;
@@ -135,7 +136,7 @@ class Room {
   }
 }
 
-const RACE_MS = 45000;
+const RACE_MS = 300000; // safety cap; a race normally ends when everyone runs out of lives
 class RaceRoom {
   constructor(code, pub, max, bots) {
     Object.assign(this, { code, pub, max, nb: bots, race: true, players: [], ph: pub ? 'count' : 'lobby', host: 0, until: Date.now() + 6000, seed: rnd(1e9) });
@@ -145,13 +146,13 @@ class RaceRoom {
   humans() { return this.players.filter(p => p.ws).length; }
   add(ws, name) {
     let id = 1; while (this.players.some(p => p.id === id)) id++;
-    const p = { id, ws, name: (name || 'Goober').slice(0, 14), e: EMOJI[id - 1], x: 0, d: 0, v: 0, c: 0, bot: !ws, w: this.ph === 'run' ? 1 : 0, tx: 0, st: 0, jt: 0, j: 0, tv: 12, lp: Date.now() };
+    const p = { id, ws, name: (name || 'Goober').slice(0, 14), e: EMOJI[id - 1], x: 0, d: 0, v: 0, c: 0, bot: !ws, w: this.ph === 'run' ? 1 : 0, l: 7, k: 0, tx: 0, st: 0, jt: 0, j: 0, tv: 12, lp: Date.now() };
     this.players.push(p); if (!p.bot && !this.host) this.host = p.id; this.lanes(); return p;
   }
   lanes() { const n = this.players.length; if (this.ph === 'count') this.players.forEach((p, i) => { p.x = n < 2 ? 0 : -0.6 + i * 1.2 / (n - 1); }); }
   newRound(n) {
     Object.assign(this, { ph: 'count', until: n + 5000, seed: rnd(1e9) });
-    for (const p of this.players) Object.assign(p, { d: 0, v: 0, c: 0, w: 0, st: 0 });
+    for (const p of this.players) Object.assign(p, { d: 0, v: 0, c: 0, w: 0, st: 0, l: 7, k: 0, j: 0 });
     this.lanes();
   }
   tick() {
@@ -162,27 +163,37 @@ class RaceRoom {
       else if (this.ph === 'run') { this.ph = 'result'; this.until = n + (this.pub ? 7000 : 10000); }
       else if (this.pub) this.newRound(n); else this.toLobby();
     }
-    if (this.ph === 'run') for (const p of this.players) if (p.bot) {
-      if (n < p.st) p.v += (4 - p.v) * 0.3;
-      else { p.v += (p.tv - p.v) * 0.15; if (Math.random() < 0.012) p.st = n + 700; }
-      if (Math.random() < 0.08) p.tx = Math.random() * 1.7 - 0.85;
-      if (Math.random() < 0.03) p.tv = 10.5 + Math.random() * 3.5;
-      if (Math.random() < 0.008) p.jt = n + 1000;
-      p.x += (p.tx - p.x) * 0.12; p.d += p.v * 0.1 * (n < p.jt ? 1.2 : 1); p.c = n < p.st ? 1 : 0; p.j = n < p.jt ? 1 : 0;
+    if (this.ph === 'run') {
+      const hum = this.players.filter(p => p.ws && !p.w), fast = hum.length && hum.every(p => p.k);
+      for (let step = fast ? 6 : 1; step--;) for (const p of this.players) if (p.bot && !p.k) {
+        if (Math.random() < 0.012 + p.d / 80000 && n >= p.st) {
+          p.st = n + 700; p.l -= Math.random() < 0.35 ? 1 : 0.5;
+          if (p.l <= 0) { p.l = 0; p.k = 1; p.v = 0; p.c = 0; continue; }
+        }
+        if (Math.random() < 0.004) p.l = Math.min(7, p.l + (Math.random() < 0.35 ? 1 : 0.5));
+        if (n < p.st) p.v += (4 - p.v) * 0.3; else p.v += (p.tv - p.v) * 0.15;
+        if (Math.random() < 0.08) p.tx = Math.random() * 1.7 - 0.85;
+        if (Math.random() < 0.03) p.tv = 10.5 + Math.random() * 3.5;
+        if (Math.random() < 0.008) p.jt = n + 1000;
+        p.x += (p.tx - p.x) * 0.12; p.d += p.v * 0.1 * (n < p.jt ? 1.2 : 1); p.c = n < p.st ? 1 : 0; p.j = n < p.jt ? 1 : 0;
+      }
+      const act = this.players.filter(p => !p.w);
+      if (act.length && act.every(p => p.k)) { this.ph = 'result'; this.until = n + (this.pub ? 7000 : 10000); }
     }
     const msg = JSON.stringify({ t: 'r', ph: this.ph, tl: this.until - n, seed: this.seed,
-      p: this.players.map(p => ({ i: p.id, n: p.name, e: p.e, x: +p.x.toFixed(3), d: +p.d.toFixed(1), b: p.bot ? 1 : 0, w: p.w, c: p.c, j: p.j })) });
+      p: this.players.map(p => ({ i: p.id, n: p.name, e: p.e, x: +p.x.toFixed(3), d: +p.d.toFixed(1), b: p.bot ? 1 : 0, w: p.w, c: p.c, j: p.j, l: p.l, k: p.k })) });
     for (const p of this.players) if (p.ws && p.ws.readyState === 1) p.ws.send(msg);
   }
   send(msg) { for (const p of this.players) if (p.ws && p.ws.readyState === 1) p.ws.send(msg); }
   lobbyMsg() { return JSON.stringify({ t: 'lobby', mode: 'race', code: this.code, host: this.host, max: this.max, p: this.players.map(p => ({ i: p.id, n: p.name, e: p.e, b: p.bot ? 1 : 0 })) }); }
   start() { if (this.ph === 'lobby' && this.players.length) this.newRound(Date.now()); }
-  toLobby() { this.ph = 'lobby'; for (const p of this.players) Object.assign(p, { d: 0, v: 0, c: 0, w: 0, j: 0 }); }
+  toLobby() { this.ph = 'lobby'; for (const p of this.players) Object.assign(p, { d: 0, v: 0, c: 0, w: 0, j: 0, l: 7, k: 0 }); }
   pos(p, m) {
     if (this.ph !== 'run' || p.w) return;
     const n = Date.now(), cap = (n - p.lp) / 1000 * 24 + 1; p.lp = n;
     p.x = Math.max(-1, Math.min(1, +m.x || 0));
     p.d = Math.min(Math.max(p.d, +m.d || 0), p.d + cap); p.c = m.c ? 1 : 0; p.j = m.j ? 1 : 0;
+    p.l = Math.max(0, Math.min(7, +m.l)); if (isNaN(p.l)) p.l = 7; p.k = p.l <= 0 ? 1 : 0;
   }
   remove(p) {
     this.players = this.players.filter(z => z !== p);
@@ -201,8 +212,9 @@ function enter(ws, room, name) {
   if (!room.pub && ph !== 'lobby' && ph !== 'result') return ws.send(JSON.stringify({ t: 'err', m: 'That match already started. Join again after it ends!' }));
   if (room.humans() >= room.max - room.players.filter(p => p.bot).length) return ws.send(JSON.stringify({ t: 'err', m: 'That room is full (max players reached).' }));
   const p = room.add(ws, name);
+  p.token = crypto.randomBytes(8).toString('hex');
   ws.room = room; ws.me = p;
-  ws.send(JSON.stringify({ t: 'joined', code: room.code, id: p.id, W, H, pub: room.pub, max: room.max, mode: room.race ? 'race' : 'grab' }));
+  ws.send(JSON.stringify({ t: 'joined', code: room.code, id: p.id, W, H, pub: room.pub, max: room.max, mode: room.race ? 'race' : 'grab', token: p.token }));
 }
 
 wss.on('connection', ws => {
@@ -211,7 +223,17 @@ wss.on('connection', ws => {
     if (m.t === 'start') { const r = ws.room; if (r && ws.me && !r.pub && r.host === ws.me.id) r.start(); return; }
     if (m.t === 'pos') { if (ws.room && ws.room.race && ws.me) ws.room.pos(ws.me, m); return; }
     if (m.t === 'dir') { const me = ws.me; if (me && me.q && m.d >= 0 && m.d < 4) { const last = me.q.length ? me.q[me.q.length - 1] : me.d; if (m.d !== last && me.q.length < 3) me.q.push(m.d); } return; }
+    if (m.t === 'leave') { const p = ws.me, r = ws.room; if (p && r) { clearTimeout(p.off); ws.me = null; r.remove(p); } return; }
     if (ws.room) return;
+    if (m.t === 'rejoin') {
+      const r = rooms.get(String(m.code || '').toUpperCase());
+      const p = r && r.players.find(z => z.token && z.token === m.token);
+      if (!p) return ws.send(JSON.stringify({ t: 'err', gone: 1, m: 'Session expired. Please join again.' }));
+      clearTimeout(p.off); p.off = null;
+      if (p.ws && p.ws !== ws) { p.ws.me = null; try { p.ws.close(); } catch (e) {} }
+      p.ws = ws; ws.room = r; ws.me = p;
+      return ws.send(JSON.stringify({ t: 'joined', code: r.code, id: p.id, W, H, pub: r.pub, max: r.max, mode: r.race ? 'race' : 'grab', token: p.token }));
+    }
     if (m.t === 'public') {
       const race = m.mode === 'race';
       let r = [...rooms.values()].find(r => r.pub && !!r.race === race && r.humans() < r.max - r.nb);
@@ -228,6 +250,11 @@ wss.on('connection', ws => {
       enter(ws, r, m.name);
     }
   });
-  ws.on('close', () => { if (ws.room && ws.me) ws.room.remove(ws.me); });
+  ws.on('close', () => {
+    const p = ws.me, room = ws.room;
+    if (!p || p.ws !== ws) return;
+    clearTimeout(p.off);
+    p.off = setTimeout(() => room.remove(p), room.pub ? 15000 : 120000); // grace period so players can come back
+  });
 });
 server.listen(process.env.PORT || 3000, () => console.log('Goober Grab running on port', process.env.PORT || 3000));
